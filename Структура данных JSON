@@ -1,0 +1,8 @@
+[
+    {
+        "date": "2024-12-25",
+        "temperature": -5.5,
+        "description": "Солнечно, небольшой снег",
+        "precipitation": true
+    }
+]
