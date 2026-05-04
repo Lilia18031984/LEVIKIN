@@ -1,0 +1,413 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+import os
+from datetime import datetime
+
+class WeatherDiary:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Weather Diary - Дневник погоды")
+        self.root.geometry("1000x700")
+        self.root.resizable(True, True)
+
+        # Файл для хранения записей
+        self.data_file = "weather_data.json"
+        self.entries = self.load_entries()
+
+        # Создание интерфейса
+        self.create_widgets()
+        
+        # Отображение всех записей
+        self.display_entries()
+
+    def create_widgets(self):
+        # Основной фрейм с отступами
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # ==================== Левая панель - Добавление записи ====================
+        left_frame = ttk.LabelFrame(main_frame, text="Добавить новую запись", padding="10")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 10))
+
+        # Поле Дата
+        ttk.Label(left_frame, text="Дата (ГГГГ-ММ-ДД):", font=("Arial", 10)).pack(anchor=tk.W, pady=(0, 5))
+        self.date_entry = ttk.Entry(left_frame, width=25)
+        self.date_entry.pack(fill=tk.X, pady=(0, 10))
+        self.date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+
+        # Поле Температура
+        ttk.Label(left_frame, text="Температура (°C):", font=("Arial", 10)).pack(anchor=tk.W, pady=(0, 5))
+        self.temp_entry = ttk.Entry(left_frame, width=25)
+        self.temp_entry.pack(fill=tk.X, pady=(0, 10))
+
+        # Поле Описание
+        ttk.Label(left_frame, text="Описание погоды:", font=("Arial", 10)).pack(anchor=tk.W, pady=(0, 5))
+        self.desc_text = tk.Text(left_frame, height=5, width=30)
+        self.desc_text.pack(fill=tk.X, pady=(0, 10))
+
+        # Чекбокс Осадки
+        self.precipitation_var = tk.BooleanVar()
+        self.precipitation_check = ttk.Checkbutton(left_frame, text="Есть осадки", variable=self.precipitation_var)
+        self.precipitation_check.pack(anchor=tk.W, pady=(0, 15))
+
+        # Кнопка Добавить запись
+        self.add_button = ttk.Button(left_frame, text="➕ Добавить запись", command=self.add_entry)
+        self.add_button.pack(fill=tk.X, pady=(0, 5))
+
+        # Кнопка Очистить поля
+        self.clear_button = ttk.Button(left_frame, text="🗑 Очистить поля", command=self.clear_fields)
+        self.clear_button.pack(fill=tk.X)
+
+        # ==================== Правая панель - Просмотр и фильтрация ====================
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Панель фильтрации
+        filter_frame = ttk.LabelFrame(right_frame, text="Фильтрация записей", padding="10")
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Фильтр по дате
+        date_filter_frame = ttk.Frame(filter_frame)
+        date_filter_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(date_filter_frame, text="Фильтр по дате:").pack(side=tk.LEFT, padx=(0, 5))
+        self.filter_date_entry = ttk.Entry(date_filter_frame, width=15)
+        self.filter_date_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.filter_date_entry.insert(0, "ГГГГ-ММ-ДД")
+        self.filter_date_entry.bind("<FocusIn>", lambda e: self.filter_date_entry.delete(0, tk.END) if self.filter_date_entry.get() == "ГГГГ-ММ-ДД" else None)
+        
+        self.apply_date_filter_btn = ttk.Button(date_filter_frame, text="Применить", command=self.filter_by_date, width=10)
+        self.apply_date_filter_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.clear_date_filter_btn = ttk.Button(date_filter_frame, text="Сбросить", command=self.clear_date_filter, width=10)
+        self.clear_date_filter_btn.pack(side=tk.LEFT)
+
+        # Фильтр по температуре
+        temp_filter_frame = ttk.Frame(filter_frame)
+        temp_filter_frame.pack(fill=tk.X)
+        
+        ttk.Label(temp_filter_frame, text="Фильтр по температуре:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.temp_filter_var = tk.StringVar(value="all")
+        ttk.Radiobutton(temp_filter_frame, text="Все", variable=self.temp_filter_var, value="all", command=self.filter_by_temp).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Radiobutton(temp_filter_frame, text="Выше +10°C", variable=self.temp_filter_var, value="above_10", command=self.filter_by_temp).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Radiobutton(temp_filter_frame, text="Ниже или равно 0°C", variable=self.temp_filter_var, value="below_0", command=self.filter_by_temp).pack(side=tk.LEFT)
+
+        # Статистика
+        stats_frame = ttk.LabelFrame(right_frame, text="Статистика", padding="10")
+        stats_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.stats_label = ttk.Label(stats_frame, text="Всего записей: 0")
+        self.stats_label.pack()
+
+        # Таблица с записями
+        table_frame = ttk.LabelFrame(right_frame, text="Список записей", padding="10")
+        table_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Создание таблицы Treeview
+        columns = ("date", "temperature", "description", "precipitation")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
+        
+        # Настройка заголовков
+        self.tree.heading("date", text="Дата")
+        self.tree.heading("temperature", text="Температура (°C)")
+        self.tree.heading("description", text="Описание")
+        self.tree.heading("precipitation", text="Осадки")
+        
+        # Настройка ширины колонок
+        self.tree.column("date", width=100)
+        self.tree.column("temperature", width=100)
+        self.tree.column("description", width=300)
+        self.tree.column("precipitation", width=80)
+        
+        # Добавление скроллбара
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Кнопки управления записями
+        btn_frame = ttk.Frame(right_frame)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.delete_button = ttk.Button(btn_frame, text="🗑 Удалить выбранную запись", command=self.delete_entry)
+        self.delete_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.edit_button = ttk.Button(btn_frame, text="✏ Редактировать запись", command=self.edit_entry)
+        self.edit_button.pack(side=tk.LEFT)
+        
+        # Статусная строка
+        self.status_var = tk.StringVar()
+        self.status_var.set("Готов к работе")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Привязка события двойного клика для редактирования
+        self.tree.bind("<Double-1>", lambda e: self.edit_entry())
+
+    def load_entries(self):
+        """Загрузка записей из JSON файла"""
+        if os.path.exists(self.data_file):
+            try:
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return []
+        return []
+
+    def save_entries(self):
+        """Сохранение записей в JSON файл"""
+        with open(self.data_file, 'w', encoding='utf-8') as f:
+            json.dump(self.entries, f, indent=4, ensure_ascii=False)
+
+    def validate_date(self, date_str):
+        """Проверка корректности формата даты"""
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
+
+    def add_entry(self):
+        """Добавление новой записи"""
+        # Получение данных из полей
+        date = self.date_entry.get().strip()
+        temp_str = self.temp_entry.get().strip()
+        description = self.desc_text.get("1.0", tk.END).strip()
+        precipitation = self.precipitation_var.get()
+
+        # Валидация
+        if not date:
+            messagebox.showerror("Ошибка", "Поле 'Дата' обязательно для заполнения!")
+            return
+        
+        if not self.validate_date(date):
+            messagebox.showerror("Ошибка", "Неверный формат даты!\nИспользуйте формат: ГГГГ-ММ-ДД\nНапример: 2024-12-25")
+            return
+        
+        try:
+            temperature = float(temp_str)
+        except ValueError:
+            messagebox.showerror("Ошибка", "Температура должна быть числом!")
+            return
+        
+        if not description:
+            messagebox.showerror("Ошибка", "Поле 'Описание' не может быть пустым!")
+            return
+
+        # Создание записи
+        entry = {
+            "date": date,
+            "temperature": temperature,
+            "description": description,
+            "precipitation": precipitation
+        }
+        
+        self.entries.append(entry)
+        self.save_entries()
+        self.display_entries()
+        self.clear_fields()
+        self.status_var.set(f"Запись от {date} успешно добавлена")
+        messagebox.showinfo("Успех", "Запись успешно добавлена!")
+
+    def display_entries(self, entries_to_display=None):
+        """Отображение записей в таблице"""
+        # Очистка таблицы
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Если передан отфильтрованный список, используем его, иначе все записи
+        display_entries = entries_to_display if entries_to_display is not None else self.entries
+        
+        # Добавление записей в таблицу
+        for entry in display_entries:
+            precipitation_text = "Да" if entry["precipitation"] else "Нет"
+            self.tree.insert("", tk.END, values=(
+                entry["date"],
+                entry["temperature"],
+                entry["description"],
+                precipitation_text
+            ))
+        
+        # Обновление статистики
+        self.update_stats(display_entries)
+
+    def update_stats(self, entries):
+        """Обновление статистики"""
+        total = len(entries)
+        self.stats_label.config(text=f"Всего записей: {total} | Отображается: {total}")
+
+    def filter_by_date(self):
+        """Фильтрация по дате"""
+        filter_date = self.filter_date_entry.get().strip()
+        
+        if filter_date == "ГГГГ-ММ-ДД" or not filter_date:
+            messagebox.showwarning("Предупреждение", "Введите дату для фильтрации!")
+            return
+        
+        if not self.validate_date(filter_date):
+            messagebox.showerror("Ошибка", "Неверный формат даты!\nИспользуйте формат: ГГГГ-ММ-ДД")
+            return
+        
+        filtered_entries = [entry for entry in self.entries if entry["date"] == filter_date]
+        
+        if filtered_entries:
+            self.display_entries(filtered_entries)
+            self.status_var.set(f"Найдено {len(filtered_entries)} записей за {filter_date}")
+        else:
+            self.display_entries([])
+            self.status_var.set(f"Записей за {filter_date} не найдено")
+            messagebox.showinfo("Результат", f"Записей за {filter_date} не найдено")
+
+    def clear_date_filter(self):
+        """Сброс фильтра по дате"""
+        self.filter_date_entry.delete(0, tk.END)
+        self.filter_date_entry.insert(0, "ГГГГ-ММ-ДД")
+        self.temp_filter_var.set("all")
+        self.display_entries()
+        self.status_var.set("Фильтры сброшены")
+
+    def filter_by_temp(self):
+        """Фильтрация по температуре"""
+        filter_type = self.temp_filter_var.get()
+        
+        if filter_type == "above_10":
+            filtered_entries = [entry for entry in self.entries if entry["temperature"] > 10]
+            self.display_entries(filtered_entries)
+            self.status_var.set(f"Найдено {len(filtered_entries)} записей с температурой выше +10°C")
+        elif filter_type == "below_0":
+            filtered_entries = [entry for entry in self.entries if entry["temperature"] <= 0]
+            self.display_entries(filtered_entries)
+            self.status_var.set(f"Найдено {len(filtered_entries)} записей с температурой ≤ 0°C")
+        else:
+            # Если выбран "Все", но может быть активен фильтр по дате
+            date_filter = self.filter_date_entry.get().strip()
+            if date_filter and date_filter != "ГГГГ-ММ-ДД" and self.validate_date(date_filter):
+                self.filter_by_date()
+            else:
+                self.display_entries()
+                self.status_var.set("Показаны все записи")
+
+    def delete_entry(self):
+        """Удаление выбранной записи"""
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Предупреждение", "Выберите запись для удаления!")
+            return
+        
+        # Получение данных выбранной записи
+        item = self.tree.item(selected[0])
+        values = item['values']
+        
+        # Поиск и удаление записи
+        for i, entry in enumerate(self.entries):
+            if (entry["date"] == values[0] and 
+                entry["temperature"] == values[1] and 
+                entry["description"] == values[2] and 
+                entry["precipitation"] == (values[3] == "Да")):
+                
+                if messagebox.askyesno("Подтверждение", f"Удалить запись от {values[0]}?"):
+                    del self.entries[i]
+                    self.save_entries()
+                    self.display_entries()
+                    self.status_var.set(f"Запись от {values[0]} удалена")
+                    break
+
+    def edit_entry(self):
+        """Редактирование выбранной записи"""
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Предупреждение", "Выберите запись для редактирования!")
+            return
+        
+        # Получение данных выбранной записи
+        item = self.tree.item(selected[0])
+        values = item['values']
+        
+        # Заполнение полей для редактирования
+        for i, entry in enumerate(self.entries):
+            if (entry["date"] == values[0] and 
+                entry["temperature"] == values[1] and 
+                entry["description"] == values[2] and 
+                entry["precipitation"] == (values[3] == "Да")):
+                
+                # Создание окна редактирования
+                edit_window = tk.Toplevel(self.root)
+                edit_window.title("Редактирование записи")
+                edit_window.geometry("400x450")
+                edit_window.resizable(False, False)
+                
+                # Поля для редактирования
+                ttk.Label(edit_window, text="Дата (ГГГГ-ММ-ДД):", font=("Arial", 10)).pack(pady=(10, 0))
+                date_edit = ttk.Entry(edit_window, width=30)
+                date_edit.insert(0, entry["date"])
+                date_edit.pack(pady=5)
+                
+                ttk.Label(edit_window, text="Температура (°C):", font=("Arial", 10)).pack(pady=(10, 0))
+                temp_edit = ttk.Entry(edit_window, width=30)
+                temp_edit.insert(0, str(entry["temperature"]))
+                temp_edit.pack(pady=5)
+                
+                ttk.Label(edit_window, text="Описание:", font=("Arial", 10)).pack(pady=(10, 0))
+                desc_edit = tk.Text(edit_window, height=5, width=35)
+                desc_edit.insert("1.0", entry["description"])
+                desc_edit.pack(pady=5)
+                
+                precip_var = tk.BooleanVar(value=entry["precipitation"])
+                precip_check = ttk.Checkbutton(edit_window, text="Есть осадки", variable=precip_var)
+                precip_check.pack(pady=10)
+                
+                def save_edit():
+                    # Валидация
+                    new_date = date_edit.get().strip()
+                    new_temp_str = temp_edit.get().strip()
+                    new_desc = desc_edit.get("1.0", tk.END).strip()
+                    
+                    if not new_date or not self.validate_date(new_date):
+                        messagebox.showerror("Ошибка", "Неверный формат даты!")
+                        return
+                    
+                    try:
+                        new_temp = float(new_temp_str)
+                    except ValueError:
+                        messagebox.showerror("Ошибка", "Температура должна быть числом!")
+                        return
+                    
+                    if not new_desc:
+                        messagebox.showerror("Ошибка", "Описание не может быть пустым!")
+                        return
+                    
+                    # Обновление записи
+                    entry["date"] = new_date
+                    entry["temperature"] = new_temp
+                    entry["description"] = new_desc
+                    entry["precipitation"] = precip_var.get()
+                    
+                    self.save_entries()
+                    self.display_entries()
+                    edit_window.destroy()
+                    self.status_var.set("Запись успешно обновлена")
+                    messagebox.showinfo("Успех", "Запись успешно обновлена!")
+                
+                ttk.Button(edit_window, text="Сохранить", command=save_edit).pack(pady=10)
+                ttk.Button(edit_window, text="Отмена", command=edit_window.destroy).pack()
+                
+                break
+
+    def clear_fields(self):
+        """Очистка полей ввода"""
+        self.date_entry.delete(0, tk.END)
+        self.date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.temp_entry.delete(0, tk.END)
+        self.desc_text.delete("1.0", tk.END)
+        self.precipitation_var.set(False)
+
+def main():
+    root = tk.Tk()
+    app = WeatherDiary(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
